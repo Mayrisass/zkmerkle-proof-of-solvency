@@ -12,7 +12,7 @@ import (
 
 const UserProofTableNamePrefix = "userproof"
 
-// AccountIdIndexName is the name of the non-unique index on account_id.
+// AccountIdIndexName is the name of the unique index on account_id.
 const AccountIdIndexName = "idx_str"
 
 type (
@@ -20,11 +20,11 @@ type (
 		CreateUserProofTable() error
 		DropUserProofTable() error
 		CreateUserProofs(rows []UserProof) error
-		// CreateAccountIdIndex adds a non-unique index on account_id after all
-		// rows have been inserted. AccountId is a Poseidon hash of user data,
-		// so duplicates are practically impossible; a uniqueness constraint is
-		// unnecessary. Building the index in one pass (sort + bulk-load) is far
-		// cheaper than maintaining it during 100M+ row inserts.
+		// CreateAccountIdIndex ensures account_id has the unique index
+		// AccountIdIndexName. New tables already get it from the UserProof
+		// struct tag; this upgrades tables created by older versions, which
+		// either lack the index or have it as non-unique. It fails if the
+		// table already contains duplicate account_ids.
 		CreateAccountIdIndex() error
 		GetUserProofByIndex(id uint32) (*UserProof, error)
 		GetUserProofById(id string) (*UserProof, error)
@@ -82,12 +82,24 @@ func (m *defaultUserProofModel) DropUserProofTable() error {
 }
 
 func (m *defaultUserProofModel) CreateAccountIdIndex() error {
-	if m.DB.Migrator().HasIndex(m.table, AccountIdIndexName) {
-		return nil
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Minute)
 	defer cancel()
-	sql := fmt.Sprintf("ALTER TABLE `%s` ADD INDEX `%s` (`account_id`)", m.table, AccountIdIndexName)
+	sql := fmt.Sprintf("ALTER TABLE `%s` ADD UNIQUE INDEX `%s` (`account_id`)", m.table, AccountIdIndexName)
+	if m.DB.Migrator().HasIndex(m.table, AccountIdIndexName) {
+		var nonUnique []int
+		err := m.DB.Raw("SELECT NON_UNIQUE FROM information_schema.STATISTICS "+
+			"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ?",
+			m.table, AccountIdIndexName).Scan(&nonUnique).Error
+		if err != nil {
+			return err
+		}
+		if len(nonUnique) > 0 && nonUnique[0] == 0 {
+			return nil
+		}
+		// replace the legacy non-unique index in a single ALTER
+		sql = fmt.Sprintf("ALTER TABLE `%s` DROP INDEX `%s`, ADD UNIQUE INDEX `%s` (`account_id`)",
+			m.table, AccountIdIndexName, AccountIdIndexName)
+	}
 	return m.DB.WithContext(ctx).Exec(sql).Error
 }
 
