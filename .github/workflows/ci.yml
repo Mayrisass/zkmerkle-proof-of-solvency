@@ -107,3 +107,4 @@ jobs:
           TEST_REDIS_ADDR: "127.0.0.1:6379"
         run: |
           go test ./src/prover/prover/ -v -run TestMockProver -timeout 300s
+          go test ./src/witness/witness/ -v -run TestCreateAccountIdIndex -timeout 120s
