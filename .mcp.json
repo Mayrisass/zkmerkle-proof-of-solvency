@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "akedo-whitepaper": {
+      "type": "http",
+      "url": "https://akedo-1.gitbook.io/akedo-whitepaper/~gitbook/mcp"
+    }
+  }
+}
